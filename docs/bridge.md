@@ -175,6 +175,14 @@ imsg nickname --address +15551234567
 imsg nickname --address +15551234567 --local
 ```
 
+`nickname --json` reads the correspondent's shared Messages Name & Photo through
+the bridge. Its result includes `address`, `has_nickname`, and the existing
+`description`. When available, it also includes `first_name`, `last_name`, and
+`display_name`. A downloaded avatar adds `avatar_path` and, when supported,
+`avatar_is_sensitive`. Missing or unavailable fields are omitted; `avatar_path`
+is a local Messages cache path, not an image download. `--local` continues to
+return your AddressBook label instead.
+
 Inspect or explicitly share the local Messages Name & Photo:
 
 ```bash

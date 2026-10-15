@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Return structured shared names and downloaded avatar metadata from `nickname --json`, preserving the existing description and omitting unavailable fields (#339, thanks @logananderson).
+
 ## 0.16.0 - 2026-10-11
 
 **Highlights:** Read exact chat identity and participants with the new `chats.get` RPC, and preserve attachment caption formatting.
