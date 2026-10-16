@@ -22,7 +22,6 @@ struct MessageRowColumns {
   let body: String
   let threadOriginatorGUID: String
   let threadOriginatorPart: String
-  let replyToGUID: String
   let balloonBundleID: String
   let payloadData: String
   let messageSummaryInfo: String
@@ -48,7 +47,6 @@ struct MessageRowColumns {
       body: "body",
       threadOriginatorGUID: "thread_originator_guid",
       threadOriginatorPart: "thread_originator_part",
-      replyToGUID: "reply_to_guid",
       balloonBundleID: MessageRowColumns.balloonBundleID,
       payloadData: MessageRowColumns.payloadData,
       messageSummaryInfo: MessageRowColumns.messageSummaryInfo,
@@ -74,7 +72,6 @@ struct DecodedMessageRow {
   let attachments: Int
   let threadOriginatorGUID: String
   let threadOriginatorPart: String
-  let databaseReplyToGUID: String
   let balloonBundleID: String
   let poll: MessagePollEvent?
   let isRead: Bool?
@@ -114,7 +111,6 @@ struct MessageRowSelection {
       schema.hasThreadOriginatorGUIDColumn ? "m.thread_originator_guid" : "NULL"
     let threadOriginatorPartColumn =
       schema.hasThreadOriginatorPartColumn ? "m.thread_originator_part" : "NULL"
-    let replyToColumn = schema.hasReplyToGUIDColumn ? "m.reply_to_guid" : "NULL"
     let balloonColumn = schema.hasBalloonBundleIDColumn ? "m.balloon_bundle_id" : "NULL"
     let pollCandidatePredicate = Self.pollCandidatePredicate(schema: schema)
     let payloadDataColumn =
@@ -140,7 +136,6 @@ struct MessageRowSelection {
              \(bodyColumn) AS \(columns.body),
              \(threadOriginatorColumn) AS \(columns.threadOriginatorGUID),
              \(threadOriginatorPartColumn) AS \(columns.threadOriginatorPart),
-             \(replyToColumn) AS \(columns.replyToGUID),
              \(balloonColumn) AS \(columns.balloonBundleID),
              \(payloadDataColumn) AS \(columns.payloadData),
              \(summaryInfoColumn) AS \(columns.messageSummaryInfo),

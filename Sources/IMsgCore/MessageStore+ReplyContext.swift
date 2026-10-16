@@ -17,8 +17,8 @@ typealias ReplyParentCache = [String: ReplyParent?]
 
 extension MessageStore {
   /// Resolves the text + sender handle of a reply parent referenced by
-  /// `thread_originator_guid`, `reply_to_guid`, or a non-reaction
-  /// `associated_message_guid`. The parent row is decoded through
+  /// `thread_originator_guid` or a non-reaction `associated_message_guid`.
+  /// The parent row is decoded through
   /// `decodeMessageRow` so the same attributedBody fallback and sender
   /// resolution applies as for top-level messages. Returns nil when the parent
   /// row is absent or the guid is empty.

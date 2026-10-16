@@ -379,7 +379,6 @@ extension MessageStore {
     let body = try dataValue(row, columns.body)
     let threadOriginatorGUID = try stringValue(row, columns.threadOriginatorGUID)
     let threadOriginatorPart = try stringValue(row, columns.threadOriginatorPart)
-    let databaseReplyToGUID = try stringValue(row, columns.replyToGUID)
     let balloonBundleID = try stringValue(row, columns.balloonBundleID)
 
     var resolvedText = text.isEmpty ? TypedStreamParser.parseAttributedBody(body) : text
@@ -436,7 +435,6 @@ extension MessageStore {
       attachments: attachments,
       threadOriginatorGUID: threadOriginatorGUID,
       threadOriginatorPart: threadOriginatorPart,
-      databaseReplyToGUID: databaseReplyToGUID,
       balloonBundleID: balloonBundleID,
       poll: poll,
       isRead: isRead,
@@ -468,9 +466,10 @@ extension MessageStore {
     if let associatedType = row.associatedType, ReactionType.isReaction(associatedType) {
       return nil
     }
-    let databaseReplyToGUID = normalizeAssociatedGUID(row.databaseReplyToGUID)
-    if !databaseReplyToGUID.isEmpty {
-      return databaseReplyToGUID
+    // Not the reply_to_guid column: Messages points it at the previous row on most messages.
+    let threadOriginatorGUID = normalizeAssociatedGUID(row.threadOriginatorGUID)
+    if !threadOriginatorGUID.isEmpty {
+      return threadOriginatorGUID
     }
     return replyToGUID(
       associatedGuid: row.associatedGUID,

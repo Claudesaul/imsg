@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Stop reporting ordinary messages as replies to the previous row; keep reply GUIDs aligned with their quoted thread parent (#347, thanks @logananderson).
+
 ## 0.17.0 - 2026-10-16
 
 **Highlights:** Read structured shared names and avatar metadata with `nickname --json`, and get faster chat unread counts.

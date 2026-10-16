@@ -155,33 +155,79 @@ func messagesAfterEnrichesAssociatedReplyParent() throws {
 }
 
 @Test
-func messagesAfterEnrichesDatabaseReplyToParent() throws {
+func rawReplyToGUIDAloneIsNotAReply() throws {
+  // Messages sets reply_to_guid to the previous row in the chat on ordinary
+  // messages, so it does not mark a reply on its own.
   let db = try ReplyContextTestDatabase.makeConnection()
   let now = Date()
   try ReplyContextTestDatabase.insertMessage(
     db,
     rowID: 1,
     handleID: 1,
-    text: "Approve the task?",
-    guid: "parent-guid",
+    text: "Previous message",
+    guid: "previous-guid",
     date: now.addingTimeInterval(-60)
   )
   try ReplyContextTestDatabase.insertMessage(
     db,
     rowID: 2,
     handleID: 2,
-    text: "Native poll",
-    guid: "poll-reply-guid",
+    text: "Ordinary message",
+    guid: "ordinary-guid",
     date: now,
-    replyToGuid: "p:0/parent-guid"
+    replyToGuid: "previous-guid"
   )
 
   let store = try MessageStore(connection: db, path: ":memory:")
   let messages = try store.messagesAfter(afterRowID: 0, chatID: 1, limit: 10)
-  let reply = try #require(messages.first { $0.rowID == 2 })
+  let message = try #require(messages.first { $0.rowID == 2 })
 
-  #expect(reply.replyToGUID == "parent-guid")
-  #expect(reply.replyToText == "Approve the task?")
+  #expect(message.replyToGUID == nil)
+  #expect(message.threadOriginatorGUID == nil)
+  #expect(message.replyToText == nil)
+  #expect(message.replyToSender == nil)
+}
+
+@Test
+func threadedReplyIgnoresRawReplyToPreviousRow() throws {
+  // An inline reply also carries reply_to_guid pointing at the previous row,
+  // which can be a different message from the one replied to.
+  let db = try ReplyContextTestDatabase.makeConnection()
+  let now = Date()
+  try ReplyContextTestDatabase.insertMessage(
+    db,
+    rowID: 1,
+    handleID: 1,
+    text: "Thread parent",
+    guid: "thread-parent",
+    date: now.addingTimeInterval(-90)
+  )
+  try ReplyContextTestDatabase.insertMessage(
+    db,
+    rowID: 2,
+    handleID: 2,
+    text: "Previous message",
+    guid: "previous-guid",
+    date: now.addingTimeInterval(-60)
+  )
+  try ReplyContextTestDatabase.insertMessage(
+    db,
+    rowID: 3,
+    handleID: 2,
+    text: "Reply",
+    guid: "reply-guid",
+    date: now,
+    replyToGuid: "previous-guid",
+    threadOriginatorGuid: "thread-parent"
+  )
+
+  let store = try MessageStore(connection: db, path: ":memory:")
+  let messages = try store.messagesAfter(afterRowID: 0, chatID: 1, limit: 10)
+  let reply = try #require(messages.first { $0.rowID == 3 })
+
+  #expect(reply.replyToGUID == "thread-parent")
+  #expect(reply.threadOriginatorGUID == "thread-parent")
+  #expect(reply.replyToText == "Thread parent")
   #expect(reply.replyToSender == "+123")
 }
 
@@ -221,7 +267,7 @@ func threadOriginatorWinsWhenBothReplyReferencesExist() throws {
   let messages = try store.messagesAfter(afterRowID: 0, chatID: 1, limit: 10)
   let reply = try #require(messages.first { $0.rowID == 3 })
 
-  #expect(reply.replyToGUID == "associated-parent")
+  #expect(reply.replyToGUID == "thread-parent")
   #expect(reply.threadOriginatorGUID == "thread-parent")
   #expect(reply.replyToText == "Thread parent")
   #expect(reply.replyToSender == "+456")

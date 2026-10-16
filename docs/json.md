@@ -49,7 +49,7 @@ Returned by `imsg history`, `imsg search`, `imsg watch`, and the JSON-RPC
 | `participants` | array | External handles. |
 | `is_group` | bool | True for group threads. |
 | `guid` | string | Message GUID. Stable across machines. |
-| `reply_to_guid` | string | When set, this message is an inline reply to that GUID. |
+| `reply_to_guid` | string | When set, this message replies to that GUID, resolved from its thread originator or a non-reaction association. Ordinary messages omit this field even when the database links them to the previous row. |
 | `destination_caller_id` | string | Outgoing only — which of your numbers Messages routed through. |
 | `balloon_bundle_id` | string | Raw Messages `message.balloon_bundle_id`, when present. URL preview rows use `com.apple.messages.URLBalloonProvider`, which lets consumers recognize link-preview payload rows without inferring from message text. |
 | `url_preview` | object | Present when imsg folds an Apple URL-preview balloon row into its originating text row. The outer message keeps the text row's `id`, `guid`, `text`, and `created_at`. |
