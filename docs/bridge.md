@@ -38,6 +38,10 @@ Formatting requires macOS 15 or newer. Multipart messages accept a JSON array of
 ```bash
 imsg send-multipart --chat 'iMessage;+;chat0000' \
   --parts '[{"text":"hi"},{"text":"there"}]'
+
+# Several photos in one message (a grouped collection on iPhone)
+imsg send-multipart --chat 'iMessage;-;+15551234567' \
+  --parts '[{"file":"/absolute/one.jpg"},{"file":"/absolute/two.jpg"}]'
 ```
 
 Send regular or audio attachments:

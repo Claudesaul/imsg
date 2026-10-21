@@ -402,3 +402,75 @@ func rpcSendRichFileRejectsMissingAttachmentCapabilityBeforeStaging() async thro
   #expect(output.responses.isEmpty)
   #expect((output.errors.first?["error"] as? [String: Any])?["code"] as? Int == -32603)
 }
+
+@Test
+func rpcMultipartStagesMixedFilesAndPublishesOneMessage() async throws {
+  let store = try makeGUIDVerificationStore()
+  let output = TestRPCOutput()
+  var staged: [String] = []
+  var captured: [[String: Any]] = []
+  var actions: [BridgeAction] = []
+  let server = RPCServer(
+    store: store, verbose: false, output: output,
+    invokeBridge: { action, params in
+      actions.append(action)
+      if action == .status { return ["selectors": ["sendMultipartFiles": true]] }
+      captured = params["parts"] as? [[String: Any]] ?? []
+      try insertOutgoing(into: store, guid: "mixed-guid")
+      return ["chatGuid": "iMessage;+;chat123", "messageGuid": "mixed-guid"]
+    },
+    stageAttachment: { path in
+      staged.append(path)
+      return "/staged" + path
+    }
+  )
+  await server.handleLineForTesting(
+    #"{"jsonrpc":"2.0","id":"files","method":"send.multipart","params":{"chat_id":1,"parts":[{"file":"/one.jpg"},{"text":"caption","text_formatting":[]},{"file":"/two.jpg"}]}}"#
+  )
+  #expect(actions == [.status, .sendMultipart])
+  #expect(staged == ["/one.jpg", "/two.jpg"])
+  #expect(captured.count == 3)
+  #expect(captured[0]["file"] as? String == "/staged/one.jpg")
+  #expect(captured[1]["text"] as? String == "caption")
+  #expect(captured[1]["textFormatting"] != nil)
+  #expect(captured[2]["file"] as? String == "/staged/two.jpg")
+  #expect(output.errors.isEmpty)
+  let result = try #require(output.responses.first?["result"] as? [String: Any])
+  #expect(result["guid"] as? String == "mixed-guid")
+  #expect(result["parts_count"] as? Int == 3)
+}
+
+@Test
+func rpcMultipartFileFailuresNeverPublish() async throws {
+  for oldBridge in [true, false] {
+    let store = try makeGUIDVerificationStore()
+    let output = TestRPCOutput()
+    var actions: [BridgeAction] = []
+    var stageCalls = 0
+    let server = RPCServer(
+      store: store, verbose: false, output: output,
+      invokeBridge: { action, _ in
+        actions.append(action)
+        return ["selectors": ["sendMultipartFiles": !oldBridge]]
+      },
+      stageAttachment: { path in
+        stageCalls += 1
+        if stageCalls == 2 { throw CocoaError(.fileReadNoSuchFile) }
+        return path
+      }
+    )
+    await server.handleLineForTesting(
+      #"{"jsonrpc":"2.0","id":"files","method":"send.multipart","params":{"chat_id":1,"parts":[{"file":"/one.jpg"},{"file":"/two.jpg"}]}}"#
+    )
+    #expect(actions == [.status])
+    #expect(stageCalls == (oldBridge ? 0 : 2))
+    #expect(output.responses.isEmpty)
+    #expect(output.errors.count == 1)
+    if !oldBridge {
+      let error = output.errors.first?["error"] as? [String: Any]
+      let data = error?["data"] as? [String: Any]
+      #expect(data?["disposition"] as? String == "not_started")
+      #expect(data?["retry_safe"] as? Bool == true)
+    }
+  }
+}

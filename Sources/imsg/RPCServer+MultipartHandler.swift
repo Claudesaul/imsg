@@ -12,34 +12,7 @@ extension RPCServer {
     guard let rawParts = try params.objectArray("parts") else {
       throw RPCError.invalidParams("parts is required")
     }
-    guard !rawParts.isEmpty, rawParts.count <= 20 else {
-      throw RPCError.invalidParams("parts must contain between 1 and 20 text parts")
-    }
-
-    var parts: [[String: Any]] = []
-    parts.reserveCapacity(rawParts.count)
-    for (index, rawPart) in rawParts.enumerated() {
-      if let key = rawPart.keys.sorted().first(where: {
-        ["file", "attachment", "mention", "mentions"].contains($0)
-      }) {
-        throw RPCError.invalidParams("\(key) parts are not supported")
-      }
-      let part = try RPCParameters(
-        rawPart,
-        method: "send.multipart parts[\(index)]",
-        supportedKeys: ["text", "text_formatting", "textFormatting"]
-      )
-      guard let text = try part.string("text"), !text.isEmpty else {
-        throw RPCError.invalidParams("parts[\(index)].text must be a non-empty string")
-      }
-      var bridgePart: [String: Any] = ["text": text]
-      if let formatting = try part.objectArray(
-        "text_formatting", aliases: ["textFormatting"])
-      {
-        bridgePart["textFormatting"] = formatting
-      }
-      parts.append(bridgePart)
-    }
+    let parts = try MultipartParts.validate(rawParts)
 
     let effect = try params.string("effect_id", aliases: ["effectId", "effect"])
     let subject = try params.string("subject")
@@ -53,6 +26,18 @@ extension RPCServer {
     }
 
     let verification = try await bridgeSendVerificationBaseline()
+    if MultipartParts.hasFiles(parts) {
+      let status = try await invokeBridge(action: .status, params: [:])
+      try MultipartParts.requireFileSupport(status)
+      do {
+        bridgeParams["parts"] = try MultipartParts.stage(parts, using: stageAttachment)
+      } catch {
+        throw DeliveryFailure(
+          disposition: .notStarted, transport: .bridgeV2,
+          operation: BridgeAction.sendMultipart.rawValue,
+          detail: "The attachments could not be staged before bridge dispatch.")
+      }
+    }
     let data = try await invokeBridge(action: .sendMultipart, params: bridgeParams)
     var result = try await verifiedBridgeSendResponse(
       data,

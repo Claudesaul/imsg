@@ -8,8 +8,10 @@ enum SendMultipartCommand {
     abstract: "Send a multi-part message",
     discussion: """
       Pass --parts as a JSON array (e.g., '[{"text":"hi"},{"text":"there"}]')
-      or via --parts-file pointing at a .json file. v1 supports text-only
-      parts; mention/file parts are a future enhancement.
+      or via --parts-file pointing at a .json file. Each of the 1–20 parts
+      contains either text (with optional textFormatting) or a file path,
+      e.g. [{"file":"/absolute/one.jpg"},{"file":"/absolute/two.jpg"}].
+      All parts are sent in one message; photos appear as a grouped collection.
       """,
     signature: CommandSignatures.withRuntimeFlags(
       CommandSignature(
@@ -31,7 +33,15 @@ enum SendMultipartCommand {
     try await run(values: values, runtime: runtime)
   }
 
-  static func run(values: ParsedValues, runtime: RuntimeOptions) async throws {
+  static func run(
+    values: ParsedValues, runtime: RuntimeOptions,
+    invokeBridge: @escaping (BridgeAction, [String: Any]) async throws -> [String: Any] = {
+      action, params in
+      try await IMsgBridgeClient.shared.invoke(action: action, params: params)
+    },
+    stageAttachment: @escaping (String) throws -> String = MessageSender
+      .stageAttachmentForMessagesApp
+  ) async throws {
     guard let chat = values.option("chat"), !chat.isEmpty else {
       throw ParsedValuesError.missingOption("chat")
     }
@@ -49,14 +59,20 @@ enum SendMultipartCommand {
     else {
       throw ParsedValuesError.invalidOption("parts")
     }
-    var params: [String: Any] = ["chatGuid": chat, "parts": parts]
+    let validated = try MultipartParts.validate(parts)
+    var params: [String: Any] = ["chatGuid": chat, "parts": validated]
     if let effect = values.option("effect"), !effect.isEmpty {
       params["effectId"] = ExpressiveSendEffect.expand(effect)
     }
     if let subject = values.option("subject"), !subject.isEmpty { params["subject"] = subject }
 
+    if MultipartParts.hasFiles(validated) {
+      let status = try await invokeBridge(.status, [:])
+      try MultipartParts.requireFileSupport(status)
+      params["parts"] = try MultipartParts.stage(validated, using: stageAttachment)
+    }
     _ = try await BridgeOutput.invokeAndEmit(
-      action: .sendMultipart, params: params, runtime: runtime
+      action: .sendMultipart, params: params, runtime: runtime, invokeBridge: invokeBridge
     ) { data in
       let guid = (data["messageGuid"] as? String) ?? ""
       let count = (data["parts_count"] as? Int) ?? 0
