@@ -45,17 +45,20 @@ func normalizeBridgeReactionType(_ raw: String, remove: Bool = false) throws -> 
     shouldRemove = true
     value.removeFirst("remove-".count)
   }
+  // Presentation selectors do not change the six classic tapback identities.
+  value = value.replacingOccurrences(of: "\u{FE0E}", with: "")
+    .replacingOccurrences(of: "\u{FE0F}", with: "")
   let normalized: String
   switch value {
-  case "love", "heart", "❤️", "❤":
+  case "love", "heart", "❤":
     normalized = "love"
   case "like", "thumbsup", "thumbs-up", "+1", "👍":
     normalized = "like"
   case "dislike", "thumbsdown", "thumbs-down", "-1", "👎":
     normalized = "dislike"
-  case "laugh", "haha", "lol", "😂", "🤣":
+  case "laugh", "haha", "lol", "😂":
     normalized = "laugh"
-  case "emphasize", "emphasis", "!!", "‼", "‼️":
+  case "emphasize", "emphasis", "!!", "‼":
     normalized = "emphasize"
   case "question", "?", "❓":
     normalized = "question"
@@ -69,6 +72,21 @@ func normalizeBridgeReactionType(_ raw: String, remove: Bool = false) throws -> 
     throw RPCError.invalidParams("unsupported tapback reaction \(raw)")
   }
   return result
+}
+
+/// A single emoji with no classic kind, sent as a custom (2006) tapback.
+func customTapbackEmoji(_ raw: String) -> String? {
+  let value = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+  guard value.count == 1, (try? normalizeBridgeReactionType(value)) == nil,
+    let first = value.unicodeScalars.first, first.properties.isEmoji,
+    first.value > 127 || value.unicodeScalars.contains("\u{20E3}")
+  else { return nil }
+  return value
+}
+
+func bridgeSupportsEmojiTapbacks(_ status: [String: Any]) -> Bool {
+  let selectors = status["selectors"] as? [String: Any]
+  return selectors?["emojiTapbackMessage"] as? Bool == true
 }
 
 extension RPCServer {
@@ -165,6 +183,25 @@ extension RPCServer {
       throw RPCError.internalError(
         "running bridge does not support rich attachment metadata; "
           + "restart Messages with the current imsg bridge"
+      )
+    }
+  }
+
+  func requireEmojiTapbackCapability() async throws {
+    let status: [String: Any]
+    do {
+      status = try await invokeBridge(action: .status, params: [:])
+    } catch {
+      throw DeliveryFailure(
+        disposition: .notStarted,
+        transport: .bridgeV2,
+        operation: BridgeAction.sendReaction.rawValue,
+        detail: "Bridge capability inspection failed before the tapback was published."
+      )
+    }
+    guard bridgeSupportsEmojiTapbacks(status) else {
+      throw RPCError.internalError(
+        "running bridge does not support emoji tapbacks; restart Messages with the current imsg bridge"
       )
     }
   }
