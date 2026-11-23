@@ -10,7 +10,9 @@ static NSDictionary *handleSendMessage(NSInteger requestId, NSDictionary *params
     id attributedBodyValue = params[@"attributedBody"];
     id textFormattingValue = params[@"textFormatting"];
     id clientMessageGuidValue = params[@"clientMessageGuid"];
-    if (![chatGuidValue isKindOfClass:[NSString class]] ||
+    id scheduledAtValue = params[@"scheduledAt"];
+    if ((scheduledAtValue && ![scheduledAtValue isKindOfClass:[NSNumber class]]) ||
+![chatGuidValue isKindOfClass:[NSString class]] ||
         (messageValue && ![messageValue isKindOfClass:[NSString class]]) ||
         (effectIdValue && ![effectIdValue isKindOfClass:[NSString class]]) ||
         (subjectValue && ![subjectValue isKindOfClass:[NSString class]]) ||
@@ -59,6 +61,24 @@ static NSDictionary *handleSendMessage(NSInteger requestId, NSDictionary *params
         (effectId.length || subject.length || selectedMessageGuid.length || partIndex != 0 ||
          attributedBodyB64.length || textFormatting.count || !ddScan)) {
         return errorResponse(requestId, @"Rich links do not support send modifiers");
+    }
+
+    NSDate *scheduledDate = nil;
+    if (scheduledAtValue) {
+        if (richLinkPreview || effectId.length || selectedMessageGuid.length ||
+            clientMessageGuid.length) {
+            return errorResponseWithDisposition(requestId,
+                @"Scheduled sends support text and subject only", @"not_started");
+        }
+        if (!message.length && !attributedBodyB64.length) {
+            return errorResponseWithDisposition(requestId,
+                @"Scheduled send needs text", @"not_started");
+        }
+        scheduledDate = [NSDate dateWithTimeIntervalSince1970:[scheduledAtValue doubleValue]];
+        if ([scheduledDate timeIntervalSinceNow] < 60) {
+            return errorResponseWithDisposition(requestId,
+                @"Scheduled time must be at least a minute ahead", @"not_started");
+        }
     }
 
     IMChat *chat = resolveChatByGuid(chatGuid);
@@ -116,6 +136,36 @@ static NSDictionary *handleSendMessage(NSInteger requestId, NSDictionary *params
     @try {
         id imMessage = nil;
         BOOL richLinkImageUsed = NO;
+        if (scheduledDate) {
+            // Messages' Send Later: this constructor marks the message
+            // scheduleType=2 / scheduleState=1 with `time` = the fire date;
+            // imagent hands it to Apple's servers, which deliver it then.
+            Class messageClass = NSClassFromString(@"IMMessage");
+            SEL schedSel = @selector(instantMessageWithText:messageSubject:flags:threadIdentifier:associatedMessageGUID:scheduledDate:);
+            if (![messageClass respondsToSelector:schedSel]) {
+                return errorResponseWithDisposition(requestId,
+                    @"Send Later is unavailable on this macOS", @"not_started");
+            }
+            id (*makeScheduled)(id, SEL, id, id, unsigned long long, id, id, id) =
+                (void *)objc_msgSend;
+            imMessage = makeScheduled(messageClass, schedSel, body, subjectAttr,
+                                      flagsForMessagePayload(subjectAttr, @[], NO),
+                                      nil, nil, scheduledDate);
+            if (!imMessage) {
+                return errorResponseWithDisposition(requestId,
+                    @"Could not build scheduled message", @"not_started");
+            }
+            [chat sendMessage:imMessage];
+            NSMutableDictionary *response = [@{
+                @"chatGuid": chatGuid,
+                @"messageGuid": outgoingMessageGuid(imMessage) ?: @"",
+                @"scheduledAt": @([scheduledDate timeIntervalSince1970]),
+                @"queued": @YES
+            } mutableCopy];
+            NSString *serviceName = serviceNameForChat(chat, chatGuid);
+            if (serviceName.length) response[@"service"] = serviceName;
+            return successResponse(requestId, response);
+        }
         if (richLinkPreview) {
             NSString *urlError = nil;
             NSURL *originalURL = validatedRichLinkURL(richLinkPreview[@"originalURL"], &urlError);

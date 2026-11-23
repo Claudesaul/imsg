@@ -23,6 +23,11 @@ enum SendRichCommand {
             label: "effect", names: [.long("effect")],
             help: "expressive send id (impact, loud, gentle, invisibleink, confetti, …)"),
           .make(label: "subject", names: [.long("subject")], help: "subject line"),
+          .make(
+            label: "at", names: [.long("at")],
+            help:
+              "Send Later: deliver at this time (local 'yyyy-MM-dd HH:mm', ISO 8601, or +30m/+2h/+1d); text and subject only"
+          ),
           .make(label: "replyTo", names: [.long("reply-to")], help: "guid of message to reply to"),
           .make(label: "part", names: [.long("part")], help: "part index (default 0)"),
           .make(
@@ -44,6 +49,7 @@ enum SendRichCommand {
       "imsg send-rich --chat 'iMessage;-;+15551234567' --text 'hi'",
       "imsg send-rich --chat 'iMessage;-;+15551234567' --reply-to ABCD --file ~/Desktop/pic.jpg",
       "imsg send-rich --chat 'iMessage;-;+15551234567' --text 'BOOM' --effect impact",
+      "imsg send-rich --chat 'iMessage;-;+15551234567' --text 'later' --at '2026-11-24 09:30'",
       "imsg send-rich --chat 'iMessage;-;+15551234567' --text 'pew pew' --effect lasers",
       "imsg send-rich --chat 'iMessage;-;+15551234567' --url https://imsg.sh",
       "imsg send-rich --chat ... --text 'hello world' --format '[{\"start\":0,\"length\":5,\"styles\":[\"bold\"]}]'",
@@ -111,6 +117,19 @@ enum SendRichCommand {
       params["effectId"] = ExpressiveSendEffect.expand(effect)
     }
     if let subject = values.option("subject"), !subject.isEmpty { params["subject"] = subject }
+    var scheduledAt: Date?
+    if let raw = values.option("at"), !raw.isEmpty {
+      guard let date = SendLaterTime.parse(raw) else {
+        throw ParsedValuesError.invalidOption("at")
+      }
+      if !file.isEmpty || richLinkURL != nil || params["effectId"] != nil
+        || values.option("replyTo") != nil
+      {
+        throw ParsedValuesError.invalidOption("at")
+      }
+      scheduledAt = date
+      params["scheduledAt"] = date.timeIntervalSince1970
+    }
     if let reply = values.option("replyTo"), !reply.isEmpty {
       params["selectedMessageGuid"] = reply
     }
@@ -152,6 +171,26 @@ enum SendRichCommand {
       return
     }
 
+    if let scheduledAt {
+      do {
+        // An older bridge ignores scheduledAt and would send right away.
+        let status = try await invokeBridge(.status, [:])
+        guard (status["selectors"] as? [String: Any])?["sendLater"] as? Bool == true else {
+          throw SendLaterTime.Unsupported()
+        }
+        let data = try await invokeBridge(.sendMessage, params)
+        let guid = (data["messageGuid"] as? String) ?? ""
+        let when = ISO8601DateFormatter.string(
+          from: scheduledAt, timeZone: .current, formatOptions: [.withInternetDateTime])
+        BridgeOutput.emit(
+          data, runtime: runtime, summary: "send-rich: scheduled for \(when) (guid=\(guid))")
+      } catch {
+        BridgeOutput.emitError(String(describing: error), runtime: runtime)
+        throw BridgeOutput.EmittedError()
+      }
+      return
+    }
+
     do {
       let sentAt = Date()
       let action: BridgeAction = preparedRichLink == nil ? .sendMessage : .sendRichLink
@@ -177,3 +216,38 @@ enum SendRichCommand {
 }
 
 // MARK: - send-multipart
+
+/// Parses `--at` for Send Later: local `yyyy-MM-dd HH:mm`, ISO 8601, or a
+/// relative offset like `+30m`, `+2h`, `+1d`.
+enum SendLaterTime {
+  struct Unsupported: Error, CustomStringConvertible {
+    var description: String {
+      "bridge has no Send Later support; run `imsg launch --force` with this build (nothing was sent)"
+    }
+  }
+
+  static func parse(_ raw: String, now: Date = Date(), timeZone: TimeZone = .current) -> Date? {
+    let value = raw.trimmingCharacters(in: .whitespaces)
+    if value.hasPrefix("+"), let unit = value.last,
+      let amount = Double(value.dropFirst().dropLast()),
+      amount > 0
+    {
+      let seconds: Double
+      switch unit {
+      case "m": seconds = 60
+      case "h": seconds = 3600
+      case "d": seconds = 86400
+      default: return nil
+      }
+      return now.addingTimeInterval(amount * seconds)
+    }
+    for format in ["yyyy-MM-dd HH:mm", "yyyy-MM-dd'T'HH:mm"] {
+      let formatter = DateFormatter()
+      formatter.locale = Locale(identifier: "en_US_POSIX")
+      formatter.timeZone = timeZone
+      formatter.dateFormat = format
+      if let date = formatter.date(from: value) { return date }
+    }
+    return ISO8601DateFormatter().date(from: value)
+  }
+}

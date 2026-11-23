@@ -367,6 +367,8 @@ static NSDictionary* handleStatus(NSInteger requestId, NSDictionary *params) {
                 && stickerAssociatedMessage),
         @"urlPreviewMessage": @(urlPreviewMessageInitializerAvailable()),
         @"sendRichLinkAction": @YES,
+        @"sendLater": @([NSClassFromString(@"IMMessage") respondsToSelector:
+            @selector(instantMessageWithText:messageSubject:flags:threadIdentifier:associatedMessageGUID:scheduledDate:)]),
         @"pollUpdateMessage": @(
             [chatClass instancesRespondToSelector:@selector(sendMessage:)]
                 && pollVoteMessageInitializerAvailable() && activeSenderHandle),
